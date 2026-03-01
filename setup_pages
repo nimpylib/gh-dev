@@ -1,0 +1,26 @@
+#!/usr/bin/env sh
+set -u
+set -e
+
+if [ $# = 0 ]; then
+owner=`gh repo view --json owner --jq .owner.login`
+name=`gh repo view  --json name --jq .name`
+REPO=$owner/$name
+else
+REPO=$1
+owner="${REPO%%/*}"
+name="${REPO#*/}"
+[ -z "$owner" -o -z "$name" ] && {
+  echo "bad argument, expect owner/name" >&2
+  exit 1
+}
+fi
+
+base_domain="$CF_API_DOMAIN"
+
+cname="${name}.${base_domain}"
+gh api -X POST "/repos/${REPO}/pages" -f build_type=workflow \
+                                      -f cname="${cname}"
+gh repo edit --homepage "https://${cname}"
+cfcli --activate -t CNAME --domain="${base_domain}" add "${name}" "${owner}.github.io"
+# defval: --token $CF_API_KEY

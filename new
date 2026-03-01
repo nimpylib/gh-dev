@@ -1,0 +1,72 @@
+#!/usr/bin/env sh
+set -u
+set -e
+
+
+git_inited(){
+  git rev-parse --is-inside-work-tree >/dev/null 2>&1
+}
+
+get_name_from_git(){
+  name=`gh repo view  --json name --jq .name`
+}
+
+last_path_part(){
+  local p="$1"
+  p="${p%/}"; echo "${p##*/}"
+}
+
+if [ $# = 0 ]; then
+  if git_inited; then
+    owner=`gh repo view --json owner --jq .owner.login`
+    get_name_from_git
+    REPO="$owner/$name"
+    name=.
+  else
+    echo "neither getting owner/repo argument nor in a git repo"
+    exit 1
+  fi
+else
+  REPO=$1
+  owner="${REPO%%/*}"
+  name="${REPO#*/}"
+  [ -z "$name" ] && {
+    name="$(last_path_part `realpath .`)"
+    REPO="$REPO$name"
+    name="../$name"
+  }
+  [ -z "$owner" ] && {
+    echo "bad argument, expect owner/name" >&2
+    exit 1
+  }
+  if ! git_inited; then
+    DIR="$(dirname "$0")"
+    LOC_TEMPL="$DIR/../template"
+    if [ -d "$LOC_TEMPL" ]; then
+      cp -r "$LOC_TEMPL" "$name"
+    else
+      gh repo clone "$owner/template" "$name" -- --quiet || true
+    fi
+  fi
+fi
+
+git --git-dir="$name/.git" remote remove origin || true
+
+gh repo new --public --source "$name" "$REPO"
+gh api -X put /repos/$REPO/subscription  -F "subscribed=true" || echo "warning: subscript to $name failed"
+
+if [[ "$name" != "." && "$name" != '..*' &&  ! -f $name/README.md ]]; then
+echo "
+# ${name}
+
+[![Test](https://github.com/${owner}/${name}/actions/workflows/ci.yml/badge.svg)](https://github.com/${owner}/${name}/actions/workflows/ci.yml)
+[![Docs](https://github.com/${owner}/${name}/actions/workflows/docs.yml/badge.svg)](https://github.com/${owner}/${name}/actions/workflows/docs.yml)
+<!--[![Commits](https://img.shields.io/github/last-commit/${owner}/${name}?style=flat)](https://github.com/${owner}/${name}/commits/)-->
+
+---
+
+[Docs](https://${owner}.github.io/${name}/)
+
+" > "$name/README.md"
+fi
+
